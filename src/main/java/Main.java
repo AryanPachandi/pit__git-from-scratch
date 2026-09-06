@@ -30,7 +30,7 @@ public class Main {
         }
       }
       case "cat-file" -> {
-        final String hash = args[1];
+        final String hash = args[2];
         // final File objectFile = new File(".git/objects", hash);
         String dirhash = hash.substring(0, 2);
         String filehash = hash.substring(2);
