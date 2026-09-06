@@ -39,7 +39,7 @@ public class Main {
         byte[] finalSha;
         String typeName;
     }
-  public static void main(String[] args){
+    public static void main(String[] args) throws Exception {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     System.err.println("Logs from your program will appear here!");
 
@@ -51,7 +51,7 @@ public class Main {
       case "init" -> {
         final File root = new File(".git");
         new File(root, "objects").mkdirs();
-        new File(root, "refs").mkdirs();
+        new File(root, "refs/heads").mkdirs();
         final File head = new File(root, "HEAD");
     
         try {
@@ -84,16 +84,13 @@ public class Main {
         }
       }
         case "hash-object" -> {
-                String fileName = args[2];
+        String fileName = args.length > 2 ? args[2] : args[1];
                 try {
-                    Path path = Paths.get(fileName);
-                    String fileContent = Files.readString(path);
-                    long fileSize = Files.size(path);
-
-                    String header = "blob " + fileSize + "\0";
-                    String combinedData = header + fileContent;
-
-                    String hash = DigestUtils.sha1Hex(combinedData);
+                        Path path = Paths.get(fileName);
+                        byte[] fileContent = Files.readAllBytes(path);
+                        byte[] combinedData = createFullObjectData("blob", fileContent);
+                        String hash = HexFormat.of().formatHex(
+                            MessageDigest.getInstance("SHA-1").digest(combinedData));
                     String blobPath = String.format(".git/objects/%s/%s",
                             hash.substring(0, 2),
                             hash.substring(2));
@@ -104,11 +101,11 @@ public class Main {
                     try (DeflaterOutputStream out =
                                  new DeflaterOutputStream(new FileOutputStream(blobFile))) {
                         // Write the combined data (header + file content)
-                        out.write(combinedData.getBytes());
+                        out.write(combinedData);
                     }
 
                     System.out.println(hash);
-                } catch (IOException e) {
+                } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             }
@@ -116,18 +113,22 @@ public class Main {
         // Locate file
         final File treeObject = getFileFromObjectSha(args[2]);
         // Decompress
-        final String content = decompressObject(treeObject);
-        // Parse
-        String[] splitArr = content.split("\0");
-        // Print to stdout
-        for (int i = 1; i < splitArr.length; i++) {
-          String[] permissionsAndName = splitArr[i].split(" ");
-          if (permissionsAndName.length < 2) {
-            break;
-          }
-          String fileName = splitArr[i].split(" ")[1];
-          System.out.println(fileName);
-        }
+                byte[] content = decompressObject(treeObject);
+                int position = objectHeaderEnd(content);
+                while (position < content.length) {
+                    int nameEnd = indexOf(content, (byte) 0, position);
+                    if (nameEnd < 0 || nameEnd + 20 >= content.length) {
+                        break;
+                    }
+                    String entry = new String(content, position, nameEnd - position,
+                                    StandardCharsets.UTF_8);
+                    int separator = entry.indexOf(' ');
+                    if (separator < 0) {
+                        break;
+                    }
+                    System.out.println(entry.substring(separator + 1));
+                    position = nameEnd + 1 + 20;
+                }
 
       }
            case "write-tree" -> {
@@ -143,8 +144,7 @@ public class Main {
 				byte[] sha = writeCommit(treeSHA, commitSHA, commitMessage);
 				System.out.println(toHexSHA(sha));
 			}
-           case "clone":
-                {
+         case "clone" -> {
                     if (args.length < 2) {
                         System.err.println("Usage: git clone <url> [dir]");
                         return;
@@ -289,7 +289,6 @@ public class Main {
                         e.printStackTrace();
                     }
 
-                    break;
                 }
       default -> System.out.println("Unknown command: " + command);
     }
@@ -352,7 +351,7 @@ public class Main {
     }
      private static byte[] writeCommit(
                             String treeSHA, String commitSHA,
-                            String commitMessage) throws IOException {
+                            String commitMessage) throws Exception {
                           String author =
                               "James Gosling <james@nighthacks.com>";
 
@@ -366,7 +365,7 @@ public class Main {
                           out.write(("\n").getBytes());
                           out.write((commitMessage + "\n").getBytes());
 
-                          return writeBlob("commit", out.toByteArray());
+                                                    return writeObject(createFullObjectData("commit", out.toByteArray()));
                         }
                             private static String readPktLine(InputStream in) throws IOException {
         byte[] lenBytes = in.readNBytes(4);
@@ -645,6 +644,81 @@ public class Main {
         }
     }
 
+    private static byte[] decompressObject(File objectFile) throws IOException {
+        try (InputStream fileStream = new FileInputStream(objectFile);
+                InflaterInputStream inflaterStream = new InflaterInputStream(fileStream);
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
+            inflaterStream.transferTo(buffer);
+            return buffer.toByteArray();
+        }
+    }
+
+    private static File getFileFromObjectSha(String sha) {
+        if (sha.length() < 3) {
+            throw new IllegalArgumentException("Invalid object SHA: " + sha);
+        }
+        return new File(".git/objects/" + sha.substring(0, 2) + "/" + sha.substring(2));
+    }
+
+    private static String toHexSHA(byte[] sha) {
+        return HexFormat.of().formatHex(sha);
+    }
+
+    private static int objectHeaderEnd(byte[] object) {
+        int nullIndex = indexOf(object, (byte) 0, 0);
+        return nullIndex < 0 ? 0 : nullIndex + 1;
+    }
+
+    private static int indexOf(byte[] data, byte value, int fromIndex) {
+        for (int i = fromIndex; i < data.length; i++) {
+            if (data[i] == value) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static byte[] objectContent(byte[] object) {
+        return Arrays.copyOfRange(object, objectHeaderEnd(object), object.length);
+    }
+
     private static void checkoutTree(
             Path repoPath, Path currentDir, String treeSha, Map<String, byte[]> store)
+            throws Exception {
+        byte[] treeObject = store.containsKey(treeSha)
+                ? createFullObjectData("tree", store.get(treeSha))
+                : decompressObject(repoPath.resolve(
+                    ".git/objects/" + treeSha.substring(0, 2) + "/" + treeSha.substring(2)).toFile());
+        byte[] treeContent = objectContent(treeObject);
+        int position = 0;
+        while (position < treeContent.length) {
+            int nameEnd = indexOf(treeContent, (byte) 0, position);
+            if (nameEnd < 0 || nameEnd + 20 >= treeContent.length) {
+                throw new IOException("Malformed tree object " + treeSha);
+            }
+            String entry = new String(treeContent, position, nameEnd - position,
+                    StandardCharsets.UTF_8);
+            int separator = entry.indexOf(' ');
+            if (separator < 0) {
+                throw new IOException("Malformed tree entry in " + treeSha);
+            }
+            String mode = entry.substring(0, separator);
+            String name = entry.substring(separator + 1);
+            String entrySha = HexFormat.of().formatHex(
+                    Arrays.copyOfRange(treeContent, nameEnd + 1, nameEnd + 21));
+            Path entryPath = currentDir.resolve(name);
+            if (mode.equals("40000") || mode.equals("040000")) {
+                Files.createDirectories(entryPath);
+                checkoutTree(repoPath, entryPath, entrySha, store);
+            } else {
+                byte[] blobObject = store.containsKey(entrySha)
+                        ? store.get(entrySha)
+                        : objectContent(decompressObject(repoPath.resolve(
+                            ".git/objects/" + entrySha.substring(0, 2) + "/" + entrySha.substring(2)).toFile()));
+                Files.write(entryPath, blobObject);
+            }
+            position = nameEnd + 21;
+        }
+    }
+
 }
