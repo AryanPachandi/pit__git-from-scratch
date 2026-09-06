@@ -1,9 +1,13 @@
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
 public class Main {
@@ -51,6 +55,35 @@ public class Main {
           throw new RuntimeException(e);
         }
       }
+        case "hash-object" -> {
+                String fileName = args[2];
+                try {
+                    Path path = Paths.get(fileName);
+                    String fileContent = Files.readString(path);
+                    long fileSize = Files.size(path);
+
+                    String header = "blob " + fileSize + "\0";
+                    String combinedData = header + fileContent;
+
+                    String hash = DigestUtils.sha1Hex(combinedData);
+                    String blobPath = String.format(".git/objects/%s/%s",
+                            hash.substring(0, 2),
+                            hash.substring(2));
+
+                    File blobFile = new File(blobPath);
+                    blobFile.getParentFile().mkdirs();
+
+                    try (DeflaterOutputStream out =
+                                 new DeflaterOutputStream(new FileOutputStream(blobFile))) {
+                        // Write the combined data (header + file content)
+                        out.write(combinedData.getBytes());
+                    }
+
+                    System.out.println(hash);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
       default -> System.out.println("Unknown command: " + command);
     }
   }
