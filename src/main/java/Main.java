@@ -45,7 +45,7 @@ public class Main {
           String blob = new BufferedReader(new InputStreamReader(new FileInputStream(blobFile))).readLine();
           String content = blob.substring(blob.indexOf("\0") + 1);
           // final byte[] content = Files.readAllBytes(blobFile.toPath());
-          System.out.write(content);
+          System.out.print(content);
         } catch (IOException e) {
           throw new RuntimeException(e);
         }
