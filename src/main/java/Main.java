@@ -34,7 +34,7 @@ public class Main {
         // final File objectFile = new File(".git/objects", hash);
         String dirhash = hash.substring(0, 2);
         String filehash = hash.substring(2);
-        File blobFile = new File(".git/objects/" + dirhash + "/" + filehash);
+        File blobFile = new File("./.git/objects/" + dirhash + "/" + filehash);
 
         if (!blobFile.exists()) {
           System.out.println("Object not found: " + hash);
