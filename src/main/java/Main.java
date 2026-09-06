@@ -26,6 +26,22 @@ public class Main {
           throw new RuntimeException(e);
         }
       }
+      case "cat-file" -> {
+        final String hash = args[1];
+        final File objectFile = new File(".git/objects", hash);
+    
+        if (!objectFile.exists()) {
+          System.out.println("Object not found: " + hash);
+          return;
+        }
+    
+        try {
+          final byte[] content = Files.readAllBytes(objectFile.toPath());
+          System.out.write(content);
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      }
       default -> System.out.println("Unknown command: " + command);
     }
   }
