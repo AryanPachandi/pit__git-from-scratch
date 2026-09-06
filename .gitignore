@@ -1,3 +1,5 @@
 *.jar
 target/
 .idea/
+ARCHITECTURE.md
+PROJECT_DETAILED.md
