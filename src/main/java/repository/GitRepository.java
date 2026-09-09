@@ -20,6 +20,25 @@ public class GitRepository {
     public Path gitDirectory() { return gitDirectory; }
     public ObjectStore objects() { return objectStore; }
 
+    public Path indexPath() { return gitDirectory.resolve("index"); }
+
+    public GitIndex index() throws IOException { return GitIndex.load(indexPath()); }
+
+    public static GitRepository open(Path start) throws IOException {
+        Path candidate = start.toAbsolutePath().normalize();
+        if (!Files.isDirectory(candidate)) candidate = candidate.getParent();
+        while (candidate != null) {
+            GitRepository repository = new GitRepository(candidate);
+            if (Files.isDirectory(repository.gitDirectory())
+                    && Files.isDirectory(repository.gitDirectory().resolve("objects"))
+                    && Files.isRegularFile(repository.head())) {
+                return repository;
+            }
+            candidate = candidate.getParent();
+        }
+        throw new IOException("not a valid pit repository (or any parent directory): " + start);
+    }
+
     public void initialize() throws IOException {
         Files.createDirectories(gitDirectory.resolve("objects"));
         Files.createDirectories(gitDirectory.resolve("refs/heads"));

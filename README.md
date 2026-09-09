@@ -29,7 +29,7 @@ The implementation is organized into CLI, command, object, repository, transport
 | `ls-tree` | Implemented | Parses a tree and prints entry names. Current syntax expects the hash at argument position 2. |
 | `commit-tree` | Implemented | Creates a commit object from supplied tree, parent, and message arguments. It does not move a branch ref. |
 | `clone` | Implemented | Downloads refs and a packfile over HTTP, stores objects, writes refs, and checks out the target tree. |
-| `add` | Planned | Requires a real Git index. |
+| `add` | Implemented | Stages files, directories, and `.` into the persistent `.git/index`. |
 | `status` | Planned | Requires comparisons between the working directory, index, and `HEAD`. |
 | `commit` | Planned | Will combine the index, tree creation, commit creation, and ref updates. |
 | `log` | Planned | Will traverse commit parents. |
@@ -51,6 +51,7 @@ write-tree
 ls-tree --name-only <tree-sha>
 commit-tree <tree-sha> -p <parent-sha> -m "message"
 clone <url> [directory]
+add <file>...
 ```
 
 The `ls-tree` option is not parsed; it places the tree hash in `args[2]`. `hash-object` reads `args[1]` for the simple form and uses `args[2]` when a third argument is supplied.
@@ -105,7 +106,7 @@ Working Directory
     Commit
 ```
 
-The index and `git add` are not implemented yet. `repository/GitIndex.java` is currently an architectural placeholder for the future `.git/index` implementation.
+`git add` writes blobs through `ObjectStore` and records normalized repository-relative paths in a versioned internal `.git/index` format. The index is loaded at the start of each command and replaced atomically after all requested paths have been processed.
 
 ## Git Object Model
 

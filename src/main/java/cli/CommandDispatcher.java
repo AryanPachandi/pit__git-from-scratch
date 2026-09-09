@@ -9,6 +9,7 @@ import commands.InitCommand;
 import commands.LsTreeCommand;
 import commands.WriteTreeCommand;
 import java.util.Map;
+import commands.*;
 
 public class CommandDispatcher {
     private final Map<String, GitCommand> commands = Map.of(
@@ -18,7 +19,8 @@ public class CommandDispatcher {
             "write-tree", new WriteTreeCommand(),
             "ls-tree", new LsTreeCommand(),
             "commit-tree", new CommitTreeCommand(),
-            "clone", new CloneCommand());
+            "clone", new CloneCommand(),
+            "add" , new GitAddCommand());
 
     public void dispatch(String[] args) throws Exception {
         if (args.length == 0) return;

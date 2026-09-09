@@ -89,6 +89,97 @@ case_hash_edge_cases() {
   return 0
 }
 
+read_index() {
+  local index=$1
+  python3 - "$index" <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+if data[:8] != b'PITINDEX':
+    raise SystemExit('unexpected index magic')
+version, count = struct.unpack_from('>II', data, 8)
+offset = 16
+entries = []
+for _ in range(count):
+    path_length = struct.unpack_from('>I', data, offset)[0]
+    offset += 4
+    path = data[offset:offset + path_length].decode()
+    offset += path_length
+    hash_length = struct.unpack_from('>I', data, offset)[0]
+    offset += 4
+    object_hash = data[offset:offset + hash_length].decode()
+    offset += hash_length
+    entries.append((path, object_hash))
+for path, object_hash in entries:
+    print(f'{path} {object_hash}')
+PY
+}
+
+case_add() {
+  local dir=$1
+  local expected updated index_before index_after
+  printf 'first version\n' > "$dir/README.md"
+  printf 'alpha\n' > "$dir/a.txt"
+  printf 'beta\n' > "$dir/b.txt"
+  : > "$dir/empty.txt"
+  mkdir "$dir/nested"
+  printf 'nested\n' > "$dir/nested/file.txt"
+  python3 - "$dir/binary.dat" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(bytes([0, 1, 127, 128, 255]))
+PY
+  (cd "$dir" && "${JAR_CMD[@]}" init > /dev/null 2>"$dir/stderr") || { echo "init failed" > "$dir/error"; return 1; }
+
+  expected=$(python3 - "$dir/README.md" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+data = Path(sys.argv[1]).read_bytes()
+print(hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest())
+PY
+)
+  (cd "$dir" && "${JAR_CMD[@]}" add README.md) || { echo "single-file add failed" > "$dir/error"; return 1; }
+  [[ -f "$dir/.git/objects/${expected:0:2}/${expected:2}" ]] || { echo "blob was not stored" > "$dir/error"; return 1; }
+  grep -qx "README.md $expected" <(read_index "$dir/.git/index") || { echo "README index entry is wrong" > "$dir/error"; return 1; }
+
+  printf 'second version\n' > "$dir/README.md"
+  updated=$(python3 - "$dir/README.md" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+data = Path(sys.argv[1]).read_bytes()
+print(hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest())
+PY
+)
+  (cd "$dir" && "${JAR_CMD[@]}" add ./README.md) || { echo "updated add failed" > "$dir/error"; return 1; }
+  grep -qx "README.md $updated" <(read_index "$dir/.git/index") || { echo "README was not updated" > "$dir/error"; return 1; }
+
+  (cd "$dir" && "${JAR_CMD[@]}" add a.txt b.txt c.txt >"$dir/missing.stdout" 2>"$dir/missing.stderr") && {
+    echo "missing file unexpectedly succeeded" > "$dir/error"; return 1;
+  }
+  index_before=$(sha256sum "$dir/.git/index" | cut -d' ' -f1)
+  (cd "$dir" && "${JAR_CMD[@]}" add a.txt missing.txt >"$dir/failure.stdout" 2>"$dir/failure.stderr") && {
+    echo "failure-safety add unexpectedly succeeded" > "$dir/error"; return 1;
+  }
+  index_after=$(sha256sum "$dir/.git/index" | cut -d' ' -f1)
+  [[ "$index_before" == "$index_after" ]] || { echo "failed add changed index" > "$dir/error"; return 1; }
+
+  (cd "$dir" && "${JAR_CMD[@]}" add .) || { echo "directory add failed" > "$dir/error"; return 1; }
+  local entries
+  entries=$(read_index "$dir/.git/index")
+  grep -qx 'a.txt [0-9a-f]\{40\}' <<< "$entries" || { echo "a.txt missing" > "$dir/error"; return 1; }
+  grep -qx 'nested/file.txt [0-9a-f]\{40\}' <<< "$entries" || { echo "nested file missing" > "$dir/error"; return 1; }
+  grep -qx 'empty.txt e69de29bb2d1d6434b8b29ae775ad8c2e48c5391' <<< "$entries" || { echo "empty file missing" > "$dir/error"; return 1; }
+  grep -qx 'binary.dat [0-9a-f]\{40\}' <<< "$entries" || { echo "binary file missing" > "$dir/error"; return 1; }
+  ! grep -q '^\.git/' <<< "$entries" || { echo ".git was staged" > "$dir/error"; return 1; }
+  [[ $(grep -c '^README.md ' <<< "$entries") -eq 1 ]] || { echo "duplicate README entry" > "$dir/error"; return 1; }
+  [[ $(grep -c '^README.md ' <<< "$(read_index "$dir/.git/index")") -eq 1 ]] || { echo "persistence check failed" > "$dir/error"; return 1; }
+  return 0
+}
+
 case_write_tree_and_ls_tree() {
   local dir=$1
   mkdir -p "$dir/sub"
@@ -159,6 +250,7 @@ if mvn -q -B package -Ddir="$BUILD_DIR" -f "$ROOT_DIR/pom.xml" >"$build_log" 2>&
   run_case 'init creates Git structure' case_init
   run_case 'hash-object stores and cat-file retrieves blob' case_hash_and_cat_file
   run_case 'hash-object handles empty files' case_hash_edge_cases
+  run_case 'add stages and persists normalized entries' case_add
   run_case 'write-tree matches Git and ls-tree lists entries' case_write_tree_and_ls_tree
   run_case 'commit-tree writes a commit object' case_commit_tree
   run_case 'cat-file reports missing objects' case_failures
