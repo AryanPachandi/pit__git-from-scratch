@@ -20,7 +20,9 @@ public class CommandDispatcher {
             "ls-tree", new LsTreeCommand(),
             "commit-tree", new CommitTreeCommand(),
             "clone", new CloneCommand(),
-            "add" , new GitAddCommand());
+            "add" , new GitAddCommand()
+            "status", new GitStatusCommand(),
+            );
 
     public void dispatch(String[] args) throws Exception {
         if (args.length == 0) return;
